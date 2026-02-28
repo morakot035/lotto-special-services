@@ -15,8 +15,8 @@ app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://lotto-app-one.vercel.app",
-      "https://lotto-service.onrender.com",
+      "https://lotto-special-app.vercel.app",
+      "https://lotto-special-services.onrender.com",
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],

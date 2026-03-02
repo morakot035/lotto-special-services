@@ -11,6 +11,15 @@ function toNumber(x) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function toBool(x) {
+  if (typeof x === "boolean") return x;
+  if (typeof x === "string") {
+    if (x.toLowerCase() === "true") return true;
+    if (x.toLowerCase() === "false") return false;
+  }
+  return null;
+}
+
 exports.createOrder = async (req, res) => {
   try {
     const { buyer_id, buyer_name, total_amount, items } = req.body || {};
@@ -27,24 +36,29 @@ exports.createOrder = async (req, res) => {
         .json({ ok: false, message: "items ต้องเป็น array และห้ามว่าง" });
     }
 
-    // validate items
+    // validate items + normalize
+    const normalizedItems = [];
+
     for (const it of items) {
-      if (!it) {
+      if (!it)
         return res.status(400).json({ ok: false, message: "items มีค่าว่าง" });
-      }
+
       if (it.type !== "special" && it.type !== "quick") {
         return res
           .status(400)
           .json({ ok: false, message: "type ต้องเป็น special|quick" });
       }
+
       if (typeof it.bet_type !== "string" || !it.bet_type.trim()) {
         return res
           .status(400)
           .json({ ok: false, message: "bet_type ห้ามว่าง" });
       }
+
       if (typeof it.number !== "string" || !it.number.trim()) {
         return res.status(400).json({ ok: false, message: "number ห้ามว่าง" });
       }
+
       const amt = toNumber(it.amount);
       if (!Number.isFinite(amt) || amt <= 0) {
         return res
@@ -52,17 +66,59 @@ exports.createOrder = async (req, res) => {
           .json({ ok: false, message: "amount ต้องมากกว่า 0" });
       }
 
-      // created_at
-      //   const dt = new Date(it.created_at);
-      //   if (Number.isNaN(dt.getTime())) {
-      //     return res
-      //       .status(400)
-      //       .json({ ok: false, message: "created_at ไม่ถูกต้อง" });
-      //   }
+      const created_at = typeof it.created_at === "string" ? it.created_at : "";
+      if (!created_at.trim()) {
+        return res
+          .status(400)
+          .json({ ok: false, message: "created_at ห้ามว่าง" });
+      }
+
+      // ✅ รับค่าเลขอั้น
+      const is_locked_raw = it.is_locked;
+      const lock_rate_raw = it.lock_rate;
+
+      let is_locked = false;
+      let lock_rate = 1;
+
+      const b = toBool(is_locked_raw);
+      if (b !== null) is_locked = b;
+
+      if (
+        lock_rate_raw !== undefined &&
+        lock_rate_raw !== null &&
+        lock_rate_raw !== ""
+      ) {
+        const lr = toNumber(lock_rate_raw);
+        if (!Number.isFinite(lr) || lr <= 0 || lr > 1) {
+          return res.status(400).json({
+            ok: false,
+            message: "lock_rate ต้องเป็นตัวเลข (0 < lock_rate <= 1)",
+          });
+        }
+        lock_rate = lr;
+      } else {
+        // ถ้าเป็นเลขอั้น แต่ไม่ส่ง rate มา -> default 0.5
+        if (is_locked) lock_rate = 0.5;
+      }
+
+      // optional เก็บ payout_amount ช่วยอนาคต
+      const payout_amount = is_locked ? amt * lock_rate : amt;
+
+      normalizedItems.push({
+        type: it.type,
+        bet_type: String(it.bet_type).trim(),
+        number: String(it.number).trim(),
+        amount: amt,
+        created_at: String(created_at),
+
+        is_locked,
+        lock_rate,
+        payout_amount,
+      });
     }
 
-    // compute total from items (กันยิงมั่ว)
-    const computedTotal = items.reduce(
+    // ✅ total ต้องเป็น "ยอดซื้อเต็ม" = sum(amount) (ไม่เกี่ยว lock)
+    const computedTotal = normalizedItems.reduce(
       (s, it) => s + Number(it.amount || 0),
       0,
     );
@@ -73,6 +129,7 @@ exports.createOrder = async (req, res) => {
         .status(400)
         .json({ ok: false, message: "total_amount ต้องมากกว่า 0" });
     }
+
     if (Math.abs(total - computedTotal) > 0.0001) {
       return res.status(400).json({
         ok: false,
@@ -80,19 +137,16 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    const userId = req.user?.id || req.user?._id;
+
     const doc = await Order.create({
       buyer_id,
       buyer_name:
         typeof buyer_name === "string" ? buyer_name.trim() : undefined,
       total_amount: total,
-      items: items.map((it) => ({
-        type: it.type,
-        bet_type: String(it.bet_type),
-        number: String(it.number),
-        amount: Number(it.amount),
-        created_at: String(it.created_at),
-      })),
-      created_by: req.user?.id || req.user?._id || undefined, // ถ้า middleware ใส่ user
+      items: normalizedItems,
+      created_by: userId || undefined,
+      updated_by: userId || undefined,
     });
 
     return res.json({

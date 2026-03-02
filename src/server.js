@@ -5,6 +5,8 @@ import { config } from "dotenv";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import buyerRoutes from "./routes/buyer.routes.js";
+import orderRoutes from "./routes/order.routes.js";
+import ruleRoutes from "./routes/rule.routes.js";
 
 config();
 connectDB();
@@ -35,7 +37,8 @@ app.use((req, res, next) => {
 });
 app.use("/api/auth", authRoutes);
 app.use("/api/buyers", buyerRoutes);
-app.get("/health", (req, res) => res.json({ ok: true }));
+app.use("/api", orderRoutes);
+app.use("/api", ruleRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));

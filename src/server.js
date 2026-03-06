@@ -7,6 +7,8 @@ import authRoutes from "./routes/auth.routes.js";
 import buyerRoutes from "./routes/buyer.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import ruleRoutes from "./routes/rule.routes.js";
+import keepSettingRoutes from "./routes/keepSetting.routes.js";
+import reportRoutes from "./routes/report.routes.js";
 
 config();
 connectDB();
@@ -39,6 +41,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/buyers", buyerRoutes);
 app.use("/api", orderRoutes);
 app.use("/api", ruleRoutes);
+app.use("/api/keep-settings", keepSettingRoutes);
+app.use("/api/reports", reportRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));

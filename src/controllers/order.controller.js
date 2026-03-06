@@ -1,6 +1,7 @@
 // src/controllers/order.controller.js
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
+const KeepSetting = require("../models/KeepSetting");
 
 function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -20,6 +21,32 @@ function toBool(x) {
   return null;
 }
 
+// ===== keep/sent helpers =====
+function betTypeToKeepKey(betType) {
+  const t = String(betType || "").trim();
+  if (t === "สามตัวบน") return "three_top";
+  if (t === "สามตัวล่าง") return "three_bottom";
+  if (t === "สามตัวโต๊ด") return "three_tod";
+  if (t === "สองตัวบน") return "two_top";
+  if (t === "สองตัวล่าง") return "two_bottom";
+  return null; // ไม่เอาเลขวิ่ง / ไม่รู้จัก
+}
+
+function splitKeepSend(keepDoc, betType, amount) {
+  const key = betTypeToKeepKey(betType);
+  const keepLimit =
+    key && keepDoc && typeof keepDoc[key] === "number" ? keepDoc[key] : 0;
+
+  const keep = Math.min(amount, keepLimit);
+  const send = Math.max(0, amount - keepLimit);
+
+  return {
+    keep_limit: keepLimit,
+    keep_amount: keep,
+    send_amount: send,
+  };
+}
+
 exports.createOrder = async (req, res) => {
   try {
     const { buyer_id, buyer_name, total_amount, items } = req.body || {};
@@ -35,6 +62,12 @@ exports.createOrder = async (req, res) => {
         .status(400)
         .json({ ok: false, message: "items ต้องเป็น array และห้ามว่าง" });
     }
+
+    const userId = req.user?.id || req.user?._id || null;
+
+    // ✅ โหลด keep settings ของ user (ถ้าไม่มี จะ default 0)
+    const keepDoc =
+      (await KeepSetting.findOne({ ownerId: userId }).lean()) || {};
 
     // validate items + normalize
     const normalizedItems = [];
@@ -97,12 +130,13 @@ exports.createOrder = async (req, res) => {
         }
         lock_rate = lr;
       } else {
-        // ถ้าเป็นเลขอั้น แต่ไม่ส่ง rate มา -> default 0.5
         if (is_locked) lock_rate = 0.5;
       }
 
-      // optional เก็บ payout_amount ช่วยอนาคต
       const payout_amount = is_locked ? amt * lock_rate : amt;
+
+      // ✅ คำนวณตัดเก็บ/ตัดส่ง
+      const split = splitKeepSend(keepDoc, it.bet_type, amt);
 
       normalizedItems.push({
         type: it.type,
@@ -111,13 +145,15 @@ exports.createOrder = async (req, res) => {
         amount: amt,
         created_at: String(created_at),
 
+        ...split,
+
         is_locked,
         lock_rate,
         payout_amount,
       });
     }
 
-    // ✅ total ต้องเป็น "ยอดซื้อเต็ม" = sum(amount) (ไม่เกี่ยว lock)
+    // ✅ total ต้องเป็น "ยอดซื้อเต็ม" = sum(amount)
     const computedTotal = normalizedItems.reduce(
       (s, it) => s + Number(it.amount || 0),
       0,
@@ -136,8 +172,6 @@ exports.createOrder = async (req, res) => {
         message: `total_amount ไม่ตรงกับผลรวมรายการ (ส่งมา ${total} แต่ควรเป็น ${computedTotal})`,
       });
     }
-
-    const userId = req.user?.id || req.user?._id;
 
     const doc = await Order.create({
       buyer_id,
@@ -187,5 +221,14 @@ exports.listOrders = async (req, res) => {
   } catch (err) {
     console.error("listOrders error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+exports.deleteEntry = async (req, res) => {
+  try {
+    const result = await Order.deleteMany({});
+    res.status(200).json({ message: "ลบข้อมูลทั้งหมดสำเร็จ", result });
+  } catch (error) {
+    res.status(500).json({ message: "เกิดข้อผิดพลาด", error });
   }
 };

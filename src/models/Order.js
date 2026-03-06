@@ -15,6 +15,9 @@ const OrderItemSchema = new mongoose.Schema(
 
     // ✅ เก็บค่าไว้ช่วยตอนคำนวณตอนจ่าย (optional)
     payout_amount: { type: Number, default: null }, // ถ้าอยากเก็บ = amount*lock_rate
+    keep_limit: { type: Number, default: 0 }, // เก็บได้ต่อเลข ณ ตอนนั้น
+    keep_amount: { type: Number, default: 0, min: 0 }, // เก็บไว้กินเอง
+    send_amount: { type: Number, default: 0, min: 0 }, // ตัดส่ง
   },
   { _id: false },
 );

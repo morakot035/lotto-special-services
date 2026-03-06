@@ -1,7 +1,11 @@
 // src/routes/order.routes.js
 import express from "express";
 
-import { createOrder, listOrders } from "../controllers/order.controller.js";
+import {
+  createOrder,
+  listOrders,
+  deleteEntry,
+} from "../controllers/order.controller.js";
 const router = express.Router();
 
 // ใช้ middleware auth ของคุณ (ดูชื่อไฟล์จริงในโปรเจกต์คุณ)
@@ -10,5 +14,6 @@ import { verifyToken } from "../middlewares/verifyToken.js";
 
 router.post("/orders", verifyToken, createOrder);
 router.get("/orders", verifyToken, listOrders);
+router.post("/order/delete", verifyToken, deleteEntry);
 
 export default router;

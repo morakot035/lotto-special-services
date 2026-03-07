@@ -1,4 +1,5 @@
 // src/controllers/keepSetting.controller.js
+const mongoose = require("mongoose");
 const KeepSetting = require("../models/KeepSetting");
 const Order = require("../models/Order");
 
@@ -20,23 +21,50 @@ function sanitizePayload(body) {
 
 function betTypeToKeepKey(betType) {
   const t = String(betType || "").trim();
+
   if (t === "สามตัวบน") return "three_top";
   if (t === "สามตัวล่าง") return "three_bottom";
   if (t === "สามตัวโต๊ด") return "three_tod";
   if (t === "สองตัวบน") return "two_top";
   if (t === "สองตัวล่าง") return "two_bottom";
+
   return null;
 }
 
-function splitKeepSend(keepDoc, betType, amount) {
-  const key = betTypeToKeepKey(betType);
-  const keepLimit =
-    key && keepDoc && typeof keepDoc[key] === "number" ? keepDoc[key] : 0;
+function buildPoolKey(betType, number) {
+  return `${String(betType || "").trim()}|${String(number || "").trim()}`;
+}
 
-  const keep = Math.min(amount, keepLimit);
-  const send = Math.max(0, amount - keepLimit);
+function splitKeepSendByNumberPool(
+  keepDoc,
+  runningTotals,
+  betType,
+  number,
+  amount,
+) {
+  const keepSettingKey = betTypeToKeepKey(betType);
+  const limit =
+    keepSettingKey && keepDoc && typeof keepDoc[keepSettingKey] === "number"
+      ? Number(keepDoc[keepSettingKey])
+      : 0;
 
-  return { keep_limit: keepLimit, keep_amount: keep, send_amount: send };
+  const poolKey = buildPoolKey(betType, number);
+  const used =
+    typeof runningTotals[poolKey] === "number"
+      ? Number(runningTotals[poolKey])
+      : 0;
+
+  const remain = Math.max(0, limit - used);
+  const keep = Math.min(amount, remain);
+  const send = Math.max(0, amount - keep);
+
+  runningTotals[poolKey] = used + keep;
+
+  return {
+    keep_limit: limit,
+    keep_amount: keep,
+    send_amount: send,
+  };
 }
 
 function startOfToday() {
@@ -46,34 +74,62 @@ function startOfToday() {
 }
 
 async function recalcOrdersForToday(ownerId, keepDoc) {
-  if (!ownerId) return { matched: 0, modified: 0 };
-
   const from = startOfToday();
 
-  const orders = await Order.find({
-    created_by: ownerId,
+  const query = {
     createdAt: { $gte: from },
-  }).lean();
+  };
 
-  if (!orders.length) return { matched: 0, modified: 0 };
+  if (ownerId) {
+    query.created_by = new mongoose.Types.ObjectId(ownerId);
+  }
 
-  const ops = orders.map((o) => {
-    const newItems = (o.items || []).map((it) => {
+  // ✅ เรียงตามเวลาจริง เพื่อให้กินโควต้าต่อเลขตามลำดับ
+  const orders = await Order.find(query).sort({ createdAt: 1, _id: 1 }).lean();
+
+  if (!orders.length) {
+    return { matched: 0, modified: 0 };
+  }
+
+  // ✅ สะสม keep แยกตาม bet_type + number
+  const runningTotals = {};
+
+  const ops = [];
+
+  for (const order of orders) {
+    const newItems = (order.items || []).map((it) => {
       const amt = Number(it.amount || 0);
-      const split = splitKeepSend(keepDoc, it.bet_type, amt);
-      return { ...it, ...split };
+
+      const split = splitKeepSendByNumberPool(
+        keepDoc,
+        runningTotals,
+        it.bet_type,
+        it.number,
+        amt,
+      );
+
+      return {
+        ...it,
+        keep_limit: split.keep_limit,
+        keep_amount: split.keep_amount,
+        send_amount: split.send_amount,
+      };
     });
 
-    return {
+    ops.push({
       updateOne: {
-        filter: { _id: o._id },
+        filter: { _id: order._id },
         update: { $set: { items: newItems } },
       },
-    };
-  });
+    });
+  }
 
-  const r = await Order.bulkWrite(ops, { ordered: false });
-  return { matched: r.matchedCount || 0, modified: r.modifiedCount || 0 };
+  const r = await Order.bulkWrite(ops, { ordered: true });
+
+  return {
+    matched: r.matchedCount || 0,
+    modified: r.modifiedCount || 0,
+  };
 }
 
 // GET /api/keep-settings
@@ -82,20 +138,26 @@ exports.getKeepSettings = async (req, res) => {
     const ownerId = req.user?.id || req.user?._id || null;
 
     let doc = await KeepSetting.findOne({ ownerId }).lean();
+
     if (!doc) {
-      const created = await KeepSetting.create({ ownerId });
+      const created = await KeepSetting.create({
+        ownerId,
+        three_top: 0,
+        three_bottom: 0,
+        three_tod: 0,
+        two_top: 0,
+        two_bottom: 0,
+      });
       doc = created.toObject();
     }
 
     return res.json({ success: true, data: doc });
   } catch (err) {
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "getKeepSettings failed",
-        error: String(err),
-      });
+    console.error("getKeepSettings failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "getKeepSettings failed",
+    });
   }
 };
 
@@ -111,17 +173,19 @@ exports.updateKeepSettings = async (req, res) => {
       { new: true, upsert: true },
     ).lean();
 
-    // ✅ อัปเดต order ของ “วันนี้” ให้คำนวณใหม่
+    // ✅ recalc ของวันนี้ใหม่ทั้งหมด แบบ "ต่อเลข"
     const recalc = await recalcOrdersForToday(ownerId, doc);
 
-    return res.json({ success: true, data: doc, recalc });
+    return res.json({
+      success: true,
+      data: doc,
+      recalc,
+    });
   } catch (err) {
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "updateKeepSettings failed",
-        error: String(err),
-      });
+    console.error("updateKeepSettings failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "updateKeepSettings failed",
+    });
   }
 };

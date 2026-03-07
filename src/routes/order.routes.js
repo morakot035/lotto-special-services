@@ -14,6 +14,6 @@ import { verifyToken } from "../middlewares/verifyToken.js";
 
 router.post("/orders", verifyToken, createOrder);
 router.get("/orders", verifyToken, listOrders);
-router.post("/order/delete", verifyToken, deleteEntry);
+router.post("/orders/delete", verifyToken, deleteEntry);
 
 export default router;

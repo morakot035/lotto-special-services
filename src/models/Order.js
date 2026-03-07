@@ -3,21 +3,20 @@ const mongoose = require("mongoose");
 
 const OrderItemSchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ["special", "quick"], required: true }, // special | quick
-    bet_type: { type: String, required: true }, // เช่น "สามตัวบน", "สองตัวล่าง"
-    number: { type: String, required: true }, // เช่น "123"
-    amount: { type: Number, required: true, min: 0 }, // ✅ ยอดซื้อเต็ม
+    type: { type: String, enum: ["special", "quick"], required: true },
+    bet_type: { type: String, required: true },
+    number: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
     created_at: { type: String, required: true },
 
-    // ✅ เลขอั้น (มีผลตอน "จ่าย" ไม่ใช่ตอนซื้อ)
-    is_locked: { type: Boolean, default: false },
-    lock_rate: { type: Number, default: 1 }, // 1=จ่ายเต็ม, 0.5=จ่ายครึ่ง
+    // ✅ keep/send ตาม "เพดานรวมของ bet_type"
+    keep_limit: { type: Number, default: 0 },
+    keep_amount: { type: Number, default: 0, min: 0 },
+    send_amount: { type: Number, default: 0, min: 0 },
 
-    // ✅ เก็บค่าไว้ช่วยตอนคำนวณตอนจ่าย (optional)
-    payout_amount: { type: Number, default: null }, // ถ้าอยากเก็บ = amount*lock_rate
-    keep_limit: { type: Number, default: 0 }, // เก็บได้ต่อเลข ณ ตอนนั้น
-    keep_amount: { type: Number, default: 0, min: 0 }, // เก็บไว้กินเอง
-    send_amount: { type: Number, default: 0, min: 0 }, // ตัดส่ง
+    is_locked: { type: Boolean, default: false },
+    lock_rate: { type: Number, default: 1 },
+    payout_amount: { type: Number, default: null },
   },
   { _id: false },
 );
@@ -30,7 +29,7 @@ const OrderSchema = new mongoose.Schema(
       required: true,
     },
     buyer_name: { type: String },
-    total_amount: { type: Number, required: true, min: 0 }, // ✅ ยอดซื้อรวม (เต็ม)
+    total_amount: { type: Number, required: true, min: 0 },
     items: { type: [OrderItemSchema], required: true },
 
     created_by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

@@ -21,27 +21,91 @@ function toBool(x) {
   return null;
 }
 
-// ===== keep/sent helpers =====
 function betTypeToKeepKey(betType) {
   const t = String(betType || "").trim();
+
   if (t === "สามตัวบน") return "three_top";
   if (t === "สามตัวล่าง") return "three_bottom";
   if (t === "สามตัวโต๊ด") return "three_tod";
   if (t === "สองตัวบน") return "two_top";
   if (t === "สองตัวล่าง") return "two_bottom";
-  return null; // ไม่เอาเลขวิ่ง / ไม่รู้จัก
+
+  return null;
 }
 
-function splitKeepSend(keepDoc, betType, amount) {
-  const key = betTypeToKeepKey(betType);
-  const keepLimit =
-    key && keepDoc && typeof keepDoc[key] === "number" ? keepDoc[key] : 0;
+function buildPoolKey(betType, number) {
+  return `${String(betType || "").trim()}|${String(number || "").trim()}`;
+}
 
-  const keep = Math.min(amount, keepLimit);
-  const send = Math.max(0, amount - keepLimit);
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// ✅ ยอด keep ที่ใช้ไปแล้วของวันนี้ "แยกตาม bet_type + number"
+async function getTodayKeptTotals(userId) {
+  const from = startOfToday();
+
+  const match = {
+    createdAt: { $gte: from },
+  };
+
+  if (userId) {
+    match.created_by = new mongoose.Types.ObjectId(userId);
+  }
+
+  const rows = await Order.aggregate([
+    { $match: match },
+    { $unwind: "$items" },
+    {
+      $group: {
+        _id: {
+          bet_type: "$items.bet_type",
+          number: "$items.number",
+        },
+        total_keep: { $sum: { $ifNull: ["$items.keep_amount", 0] } },
+      },
+    },
+  ]);
+
+  const totals = {};
+  for (const row of rows) {
+    const key = buildPoolKey(row._id.bet_type, row._id.number);
+    totals[key] = Number(row.total_keep || 0);
+  }
+
+  return totals;
+}
+
+// ✅ ตัดเก็บตาม "ยอดต่อเลข" ของแต่ละประเภท
+function splitKeepSendByNumberPool(
+  keepDoc,
+  runningTotals,
+  betType,
+  number,
+  amount,
+) {
+  const keepSettingKey = betTypeToKeepKey(betType);
+  const limit =
+    keepSettingKey && keepDoc && typeof keepDoc[keepSettingKey] === "number"
+      ? Number(keepDoc[keepSettingKey])
+      : 0;
+
+  const poolKey = buildPoolKey(betType, number);
+  const used =
+    typeof runningTotals[poolKey] === "number"
+      ? Number(runningTotals[poolKey])
+      : 0;
+
+  const remain = Math.max(0, limit - used);
+  const keep = Math.min(amount, remain);
+  const send = Math.max(0, amount - keep);
+
+  runningTotals[poolKey] = used + keep;
 
   return {
-    keep_limit: keepLimit,
+    keep_limit: limit,
     keep_amount: keep,
     send_amount: send,
   };
@@ -65,16 +129,23 @@ exports.createOrder = async (req, res) => {
 
     const userId = req.user?.id || req.user?._id || null;
 
-    // ✅ โหลด keep settings ของ user (ถ้าไม่มี จะ default 0)
-    const keepDoc =
-      (await KeepSetting.findOne({ ownerId: userId }).lean()) || {};
+    const keepDoc = (await KeepSetting.findOne({ ownerId: userId }).lean()) || {
+      three_top: 0,
+      three_bottom: 0,
+      three_tod: 0,
+      two_top: 0,
+      two_bottom: 0,
+    };
 
-    // validate items + normalize
+    // ✅ ยอดที่ keep ไปแล้ววันนี้ แยกตาม "bet_type + number"
+    const runningTotals = await getTodayKeptTotals(userId);
+
     const normalizedItems = [];
 
     for (const it of items) {
-      if (!it)
+      if (!it) {
         return res.status(400).json({ ok: false, message: "items มีค่าว่าง" });
+      }
 
       if (it.type !== "special" && it.type !== "quick") {
         return res
@@ -106,7 +177,9 @@ exports.createOrder = async (req, res) => {
           .json({ ok: false, message: "created_at ห้ามว่าง" });
       }
 
-      // ✅ รับค่าเลขอั้น
+      const betType = String(it.bet_type).trim();
+      const number = String(it.number).trim();
+
       const is_locked_raw = it.is_locked;
       const lock_rate_raw = it.lock_rate;
 
@@ -135,17 +208,25 @@ exports.createOrder = async (req, res) => {
 
       const payout_amount = is_locked ? amt * lock_rate : amt;
 
-      // ✅ คำนวณตัดเก็บ/ตัดส่ง
-      const split = splitKeepSend(keepDoc, it.bet_type, amt);
+      // ✅ logic ใหม่: ตัดเก็บตามยอดสะสม "ต่อเลข"
+      const split = splitKeepSendByNumberPool(
+        keepDoc,
+        runningTotals,
+        betType,
+        number,
+        amt,
+      );
 
       normalizedItems.push({
         type: it.type,
-        bet_type: String(it.bet_type).trim(),
-        number: String(it.number).trim(),
+        bet_type: betType,
+        number,
         amount: amt,
         created_at: String(created_at),
 
-        ...split,
+        keep_limit: split.keep_limit,
+        keep_amount: split.keep_amount,
+        send_amount: split.send_amount,
 
         is_locked,
         lock_rate,
@@ -153,7 +234,6 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // ✅ total ต้องเป็น "ยอดซื้อเต็ม" = sum(amount)
     const computedTotal = normalizedItems.reduce(
       (s, it) => s + Number(it.amount || 0),
       0,

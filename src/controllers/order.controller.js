@@ -2,6 +2,11 @@
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const KeepSetting = require("../models/KeepSetting");
+const {
+  loadActiveKickRulesMap,
+  getTodayKeptTotals,
+  splitKeepSendByNumberPool,
+} = require("../utils/keepPool");
 
 function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -19,96 +24,6 @@ function toBool(x) {
     if (x.toLowerCase() === "false") return false;
   }
   return null;
-}
-
-function betTypeToKeepKey(betType) {
-  const t = String(betType || "").trim();
-
-  if (t === "สามตัวบน") return "three_top";
-  if (t === "สามตัวล่าง") return "three_bottom";
-  if (t === "สามตัวโต๊ด") return "three_tod";
-  if (t === "สองตัวบน") return "two_top";
-  if (t === "สองตัวล่าง") return "two_bottom";
-
-  return null;
-}
-
-function buildPoolKey(betType, number) {
-  return `${String(betType || "").trim()}|${String(number || "").trim()}`;
-}
-
-function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-// ✅ ยอด keep ที่ใช้ไปแล้วของวันนี้ "แยกตาม bet_type + number"
-async function getTodayKeptTotals(userId) {
-  const from = startOfToday();
-
-  const match = {
-    createdAt: { $gte: from },
-  };
-
-  if (userId) {
-    match.created_by = new mongoose.Types.ObjectId(userId);
-  }
-
-  const rows = await Order.aggregate([
-    { $match: match },
-    { $unwind: "$items" },
-    {
-      $group: {
-        _id: {
-          bet_type: "$items.bet_type",
-          number: "$items.number",
-        },
-        total_keep: { $sum: { $ifNull: ["$items.keep_amount", 0] } },
-      },
-    },
-  ]);
-
-  const totals = {};
-  for (const row of rows) {
-    const key = buildPoolKey(row._id.bet_type, row._id.number);
-    totals[key] = Number(row.total_keep || 0);
-  }
-
-  return totals;
-}
-
-// ✅ ตัดเก็บตาม "ยอดต่อเลข" ของแต่ละประเภท
-function splitKeepSendByNumberPool(
-  keepDoc,
-  runningTotals,
-  betType,
-  number,
-  amount,
-) {
-  const keepSettingKey = betTypeToKeepKey(betType);
-  const limit =
-    keepSettingKey && keepDoc && typeof keepDoc[keepSettingKey] === "number"
-      ? Number(keepDoc[keepSettingKey])
-      : 0;
-
-  const poolKey = buildPoolKey(betType, number);
-  const used =
-    typeof runningTotals[poolKey] === "number"
-      ? Number(runningTotals[poolKey])
-      : 0;
-
-  const remain = Math.max(0, limit - used);
-  const keep = Math.min(amount, remain);
-  const send = Math.max(0, amount - keep);
-
-  runningTotals[poolKey] = used + keep;
-
-  return {
-    keep_limit: limit,
-    keep_amount: keep,
-    send_amount: send,
-  };
 }
 
 exports.createOrder = async (req, res) => {
@@ -137,8 +52,8 @@ exports.createOrder = async (req, res) => {
       two_bottom: 0,
     };
 
-    // ✅ ยอดที่ keep ไปแล้ววันนี้ แยกตาม "bet_type + number"
     const runningTotals = await getTodayKeptTotals(userId);
+    const kickRulesMap = await loadActiveKickRulesMap(userId);
 
     const normalizedItems = [];
 
@@ -208,9 +123,10 @@ exports.createOrder = async (req, res) => {
 
       const payout_amount = is_locked ? amt * lock_rate : amt;
 
-      // ✅ logic ใหม่: ตัดเก็บตามยอดสะสม "ต่อเลข"
+      // ✅ keep setting ปกติ + เตะเพิ่มเฉพาะเลข
       const split = splitKeepSendByNumberPool(
         keepDoc,
+        kickRulesMap,
         runningTotals,
         betType,
         number,
@@ -224,9 +140,12 @@ exports.createOrder = async (req, res) => {
         amount: amt,
         created_at: String(created_at),
 
+        keep_base_limit: split.keep_base_limit,
         keep_limit: split.keep_limit,
         keep_amount: split.keep_amount,
         send_amount: split.send_amount,
+        kick_mode: split.kick_mode,
+        kick_amount: split.kick_amount,
 
         is_locked,
         lock_rate,

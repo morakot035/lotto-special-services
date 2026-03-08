@@ -10,6 +10,7 @@ import ruleRoutes from "./routes/rule.routes.js";
 import keepSettingRoutes from "./routes/keepSetting.routes.js";
 import reportRoutes from "./routes/report.routes.js";
 import kickRuleRoutes from "./routes/kickRule.routes.js";
+import buyerSummaryRoutes from "./routes/buyerSummary.routes.js";
 
 config();
 connectDB();
@@ -45,6 +46,7 @@ app.use("/api", ruleRoutes);
 app.use("/api/keep-settings", keepSettingRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/kick-rules", kickRuleRoutes);
+app.use("/api/buyer-summary", buyerSummaryRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));

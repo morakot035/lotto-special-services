@@ -591,3 +591,80 @@ exports.exportSummary3DExcel = async (req, res) => {
       .json({ success: false, message: "Export excel failed" });
   }
 };
+
+function sumAmount(rows, key) {
+  return rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
+}
+
+exports.getOverallSummaryReport = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id || null;
+
+    const match = {};
+    // if (userId) {
+    //   match.created_by = userId;
+    // }
+
+    const rows = await Order.aggregate([
+      { $match: match },
+      { $unwind: "$items" },
+      {
+        $match: {
+          "items.bet_type": {
+            $in: [
+              "สองตัวบน",
+              "สองตัวล่าง",
+              "สามตัวบน",
+              "สามตัวล่าง",
+              "สามตัวโต๊ด",
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$items.bet_type",
+          total_amount: { $sum: { $ifNull: ["$items.amount", 0] } },
+        },
+      },
+    ]);
+
+    const result = {
+      two_top: 0,
+      two_bottom: 0,
+      three_top: 0,
+      three_bottom: 0,
+      three_tod: 0,
+      grand_total: 0,
+    };
+
+    for (const row of rows) {
+      const betType = row._id;
+      const total = Number(row.total_amount || 0);
+
+      if (betType === "สองตัวบน") result.two_top = total;
+      if (betType === "สองตัวล่าง") result.two_bottom = total;
+      if (betType === "สามตัวบน") result.three_top = total;
+      if (betType === "สามตัวล่าง") result.three_bottom = total;
+      if (betType === "สามตัวโต๊ด") result.three_tod = total;
+    }
+
+    result.grand_total =
+      result.two_top +
+      result.two_bottom +
+      result.three_top +
+      result.three_bottom +
+      result.three_tod;
+
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    console.error("getOverallSummaryReport error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

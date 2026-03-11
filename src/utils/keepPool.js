@@ -47,42 +47,7 @@ async function loadActiveKickRulesMap(ownerId) {
   return map;
 }
 
-// ✅ ยอด keep ของวันนี้ "แยกตาม bet_type + number"
-async function getTodayKeptTotals(ownerId) {
-  const from = startOfToday();
-
-  const match = {
-    createdAt: { $gte: from },
-  };
-
-  if (ownerId) {
-    match.created_by = ownerIdToFilter(ownerId);
-  }
-
-  const rows = await Order.aggregate([
-    { $match: match },
-    { $unwind: "$items" },
-    {
-      $group: {
-        _id: {
-          bet_type: "$items.bet_type",
-          number: "$items.number",
-        },
-        total_keep: { $sum: { $ifNull: ["$items.keep_amount", 0] } },
-      },
-    },
-  ]);
-
-  const totals = {};
-  for (const row of rows) {
-    const key = buildPoolKey(row._id.bet_type, row._id.number);
-    totals[key] = Number(row.total_keep || 0);
-  }
-
-  return totals;
-}
-
-function getEffectiveKeepLimit(keepDoc, kickRulesMap, betType, number) {
+function getRuleInfo(keepDoc, kickRulesMap, betType, number) {
   const keepSettingKey = betTypeToKeepKey(betType);
   const baseLimit =
     keepSettingKey && keepDoc && typeof keepDoc[keepSettingKey] === "number"
@@ -114,6 +79,7 @@ function getEffectiveKeepLimit(keepDoc, kickRulesMap, betType, number) {
     const reduceAmount = Number(rule.amount || 0);
     return {
       base_limit: baseLimit,
+      // ✅ เพดาน keep หลังหักเตะเพิ่ม
       effective_limit: Math.max(0, baseLimit - reduceAmount),
       kick_mode: "REDUCE_KEEP",
       kick_amount: reduceAmount,
@@ -128,29 +94,72 @@ function getEffectiveKeepLimit(keepDoc, kickRulesMap, betType, number) {
   };
 }
 
+/**
+ * logic ใหม่:
+ * - FULL_SEND => ส่งทั้งหมด
+ * - REDUCE_KEEP => บังคับส่งออกก่อนตาม kick_amount
+ *                  และเพดาน keep ของเลขนี้จะเหลือ base_limit - kick_amount
+ */
 function splitKeepSendByNumberPool(
   keepDoc,
   kickRulesMap,
-  runningTotals,
+  runningKeepTotals,
+  runningKickSentTotals,
   betType,
   number,
   amount,
 ) {
   const poolKey = buildPoolKey(betType, number);
 
-  const { base_limit, effective_limit, kick_mode, kick_amount } =
-    getEffectiveKeepLimit(keepDoc, kickRulesMap, betType, number);
+  const { base_limit, effective_limit, kick_mode, kick_amount } = getRuleInfo(
+    keepDoc,
+    kickRulesMap,
+    betType,
+    number,
+  );
 
-  const used =
-    typeof runningTotals[poolKey] === "number"
-      ? Number(runningTotals[poolKey])
+  const currentKeepUsed =
+    typeof runningKeepTotals[poolKey] === "number"
+      ? Number(runningKeepTotals[poolKey])
       : 0;
-  const remain = Math.max(0, effective_limit - used);
 
-  const keep = Math.min(amount, remain);
-  const send = Math.max(0, amount - keep);
+  const currentKickSentUsed =
+    typeof runningKickSentTotals[poolKey] === "number"
+      ? Number(runningKickSentTotals[poolKey])
+      : 0;
 
-  runningTotals[poolKey] = used + keep;
+  // เตะออกหมด
+  if (kick_mode === "FULL_SEND") {
+    runningKickSentTotals[poolKey] = currentKickSentUsed + amount;
+
+    return {
+      keep_base_limit: base_limit,
+      keep_limit: 0,
+      keep_amount: 0,
+      send_amount: amount,
+      kick_mode,
+      kick_amount,
+      kick_send_amount: amount,
+    };
+  }
+
+  let forcedKickSend = 0;
+  let remainingAmount = amount;
+
+  // ✅ REDUCE_KEEP = ต้องโดนส่งออกก่อนตามยอดที่กำหนด
+  if (kick_mode === "REDUCE_KEEP") {
+    const kickSendRemain = Math.max(0, kick_amount - currentKickSentUsed);
+    forcedKickSend = Math.min(amount, kickSendRemain);
+    remainingAmount = amount - forcedKickSend;
+    runningKickSentTotals[poolKey] = currentKickSentUsed + forcedKickSend;
+  }
+
+  // ✅ keep ใช้เพดานหลังหักเตะเพิ่มแล้ว
+  const keepRemain = Math.max(0, effective_limit - currentKeepUsed);
+  const keep = Math.min(remainingAmount, keepRemain);
+  const send = forcedKickSend + Math.max(0, remainingAmount - keep);
+
+  runningKeepTotals[poolKey] = currentKeepUsed + keep;
 
   return {
     keep_base_limit: base_limit,
@@ -159,6 +168,44 @@ function splitKeepSendByNumberPool(
     send_amount: send,
     kick_mode,
     kick_amount,
+    kick_send_amount: forcedKickSend,
+  };
+}
+
+// ✅ คำนวณ progress ของวันนี้ใหม่จาก order ทั้งหมดตามลำดับเวลา
+async function getTodayPoolProgress(ownerId, keepDoc, kickRulesMap) {
+  const from = startOfToday();
+
+  const query = {
+    createdAt: { $gte: from },
+  };
+
+  if (ownerId) {
+    query.created_by = ownerIdToFilter(ownerId);
+  }
+
+  const orders = await Order.find(query).sort({ createdAt: 1, _id: 1 }).lean();
+
+  const runningKeepTotals = {};
+  const runningKickSentTotals = {};
+
+  for (const order of orders) {
+    for (const it of order.items || []) {
+      splitKeepSendByNumberPool(
+        keepDoc,
+        kickRulesMap,
+        runningKeepTotals,
+        runningKickSentTotals,
+        it.bet_type,
+        it.number,
+        Number(it.amount || 0),
+      );
+    }
+  }
+
+  return {
+    runningKeepTotals,
+    runningKickSentTotals,
   };
 }
 
@@ -175,14 +222,14 @@ async function recalcOrdersForToday(ownerId, keepDoc) {
 
   const kickRulesMap = await loadActiveKickRulesMap(ownerId);
 
-  // ✅ เรียงตามเวลาจริง เพื่อให้กินโควต้า keep ตามลำดับจริง
   const orders = await Order.find(query).sort({ createdAt: 1, _id: 1 }).lean();
 
   if (!orders.length) {
     return { matched: 0, modified: 0 };
   }
 
-  const runningTotals = {};
+  const runningKeepTotals = {};
+  const runningKickSentTotals = {};
   const ops = [];
 
   for (const order of orders) {
@@ -192,7 +239,8 @@ async function recalcOrdersForToday(ownerId, keepDoc) {
       const split = splitKeepSendByNumberPool(
         keepDoc,
         kickRulesMap,
-        runningTotals,
+        runningKeepTotals,
+        runningKickSentTotals,
         it.bet_type,
         it.number,
         amt,
@@ -206,6 +254,7 @@ async function recalcOrdersForToday(ownerId, keepDoc) {
         send_amount: split.send_amount,
         kick_mode: split.kick_mode,
         kick_amount: split.kick_amount,
+        kick_send_amount: split.kick_send_amount,
       };
     });
 
@@ -230,7 +279,7 @@ module.exports = {
   buildPoolKey,
   startOfToday,
   loadActiveKickRulesMap,
-  getTodayKeptTotals,
+  getTodayPoolProgress,
   splitKeepSendByNumberPool,
   recalcOrdersForToday,
 };

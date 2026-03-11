@@ -4,7 +4,7 @@ const Order = require("../models/Order");
 const KeepSetting = require("../models/KeepSetting");
 const {
   loadActiveKickRulesMap,
-  getTodayKeptTotals,
+  getTodayPoolProgress,
   splitKeepSendByNumberPool,
 } = require("../utils/keepPool");
 
@@ -52,8 +52,11 @@ exports.createOrder = async (req, res) => {
       two_bottom: 0,
     };
 
-    const runningTotals = await getTodayKeptTotals(userId);
     const kickRulesMap = await loadActiveKickRulesMap(userId);
+
+    // ✅ replay วันนี้ทั้งหมดก่อน เพื่อให้รู้ progress จริงของ keep + kick send
+    const { runningKeepTotals, runningKickSentTotals } =
+      await getTodayPoolProgress(userId, keepDoc, kickRulesMap);
 
     const normalizedItems = [];
 
@@ -123,11 +126,11 @@ exports.createOrder = async (req, res) => {
 
       const payout_amount = is_locked ? amt * lock_rate : amt;
 
-      // ✅ keep setting ปกติ + เตะเพิ่มเฉพาะเลข
       const split = splitKeepSendByNumberPool(
         keepDoc,
         kickRulesMap,
-        runningTotals,
+        runningKeepTotals,
+        runningKickSentTotals,
         betType,
         number,
         amt,
@@ -146,6 +149,7 @@ exports.createOrder = async (req, res) => {
         send_amount: split.send_amount,
         kick_mode: split.kick_mode,
         kick_amount: split.kick_amount,
+        kick_send_amount: split.kick_send_amount,
 
         is_locked,
         lock_rate,

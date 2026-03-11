@@ -9,15 +9,14 @@ const OrderItemSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 0 },
     created_at: { type: String, required: true },
 
-    // keep/send
-    keep_base_limit: { type: Number, default: 0 }, // keep setting เดิม
-    keep_limit: { type: Number, default: 0 }, // effective keep หลังเตะเพิ่ม
+    keep_base_limit: { type: Number, default: 0 },
+    keep_limit: { type: Number, default: 0 },
     keep_amount: { type: Number, default: 0, min: 0 },
     send_amount: { type: Number, default: 0, min: 0 },
 
-    // kick rule snapshot
-    kick_mode: { type: String, default: null }, // FULL_SEND | REDUCE_KEEP | null
+    kick_mode: { type: String, default: null },
     kick_amount: { type: Number, default: 0 },
+    kick_send_amount: { type: Number, default: 0 }, // ✅ เพิ่มตรงนี้
 
     is_locked: { type: Boolean, default: false },
     lock_rate: { type: Number, default: 1 },

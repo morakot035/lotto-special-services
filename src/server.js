@@ -12,6 +12,7 @@ import reportRoutes from "./routes/report.routes.js";
 import kickRuleRoutes from "./routes/kickRule.routes.js";
 import buyerSummaryRoutes from "./routes/buyerSummary.routes.js";
 import orderItemRoutes from "./routes/orderItem.routes.js";
+import lotteryResultRoutes from "./routes/lotteryResult.routes.js";
 
 config();
 connectDB();
@@ -49,6 +50,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/kick-rules", kickRuleRoutes);
 app.use("/api/buyer-summary", buyerSummaryRoutes);
 app.use("/api/order-items", orderItemRoutes);
+app.use("/api/lottery-results", lotteryResultRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));

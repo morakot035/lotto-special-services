@@ -1,4 +1,3 @@
-// src/controllers/lotteryResult.controller.js
 const mongoose = require("mongoose");
 const LotteryResult = require("../models/LotteryResult");
 const Order = require("../models/Order");
@@ -17,32 +16,30 @@ function isTwoDigits(value) {
   return /^\d{2}$/.test(String(value || ""));
 }
 
+// สร้าง permutations ทั้งหมดของเลข 3 ตัว (สำหรับโต๊ด)
 function getPermutations3(input) {
   const s = String(input || "");
   if (s.length !== 3) return [];
   const arr = s.split("");
   const set = new Set();
-
-  for (let i = 0; i < arr.length; i += 1) {
-    for (let j = 0; j < arr.length; j += 1) {
-      for (let k = 0; k < arr.length; k += 1) {
-        if (i !== j && j !== k && i !== k) {
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++)
+      for (let k = 0; k < 3; k++)
+        if (i !== j && j !== k && i !== k)
           set.add(`${arr[i]}${arr[j]}${arr[k]}`);
-        }
-      }
-    }
-  }
-
   return Array.from(set);
 }
 
+// canonical key สำหรับโต๊ด (เรียงตัวเลข) เช่น 321 → 123
+function canonicalTod(n) {
+  return String(n || "")
+    .split("")
+    .sort()
+    .join("");
+}
+
 function buildEmptyGroup(label) {
-  return {
-    bet_type: label,
-    total_amount: 0,
-    total_count: 0,
-    rows: [],
-  };
+  return { bet_type: label, total_amount: 0, total_count: 0, rows: [] };
 }
 
 function pushWinner(group, row) {
@@ -64,12 +61,10 @@ exports.saveAndCheckLottery = async (req, res) => {
     const three_bottom_3 = normalizeDigits(req.body?.three_bottom_3);
     const three_bottom_4 = normalizeDigits(req.body?.three_bottom_4);
 
-    if (!draw_date) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณากรอกวันที่หวยออก/งวด",
-      });
-    }
+    if (!draw_date)
+      return res
+        .status(400)
+        .json({ success: false, message: "กรุณากรอกวันที่หวยออก/งวด" });
 
     if (
       !isThreeDigits(three_top) ||
@@ -78,18 +73,17 @@ exports.saveAndCheckLottery = async (req, res) => {
       !isThreeDigits(three_bottom_2) ||
       !isThreeDigits(three_bottom_3) ||
       !isThreeDigits(three_bottom_4)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณากรอกผลหวยให้ครบและรูปแบบตัวเลขให้ถูกต้อง",
-      });
-    }
+    )
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "กรุณากรอกผลหวยให้ครบและรูปแบบตัวเลขให้ถูกต้อง",
+        });
 
-    const savedResult = await LotteryResult.findOneAndUpdate(
-      {
-        ownerId: ownerId || null,
-        draw_date,
-      },
+    // บันทึกผล
+    await LotteryResult.findOneAndUpdate(
+      { ownerId: ownerId || null, draw_date },
       {
         $set: {
           ownerId: ownerId || null,
@@ -105,30 +99,38 @@ exports.saveAndCheckLottery = async (req, res) => {
       { new: true, upsert: true },
     ).lean();
 
-    const orderQuery = {};
-    if (ownerId) {
-      orderQuery.created_by = new mongoose.Types.ObjectId(ownerId);
-    }
+    // ── เตรียม lookup values ────────────────────────────────────────────────
 
-    const orders = await Order.find(orderQuery)
-      .sort({ createdAt: -1, _id: -1 })
-      .lean();
-
+    // 2 ตัวบน = 2 ตัวท้ายของ 3 ตัวบน
     const two_top = three_top.slice(-2);
+
+    // 3 ตัวล่าง (ชุด 4 เลข)
     const threeBottomSet = new Set([
       three_bottom_1,
       three_bottom_2,
       three_bottom_3,
       three_bottom_4,
     ]);
-    const threeTodSet = new Set(getPermutations3(three_top));
 
+    // โต๊ด = permutation ทั้งหมดของ 3 ตัวบน
+    // รองรับทั้งเลขที่ store เป็นตัวจริง (321) และ canonical (123)
+    const threeTodPerms = new Set(getPermutations3(three_top)); // เลขจริงทุก permutation
+    const threeTodCanon = canonicalTod(three_top); // canonical key
+
+    // ── ดึง orders ─────────────────────────────────────────────────────────
+    const orderQuery = {};
+    if (ownerId) orderQuery.created_by = new mongoose.Types.ObjectId(ownerId);
+
+    const orders = await Order.find(orderQuery)
+      .sort({ createdAt: -1, _id: -1 })
+      .lean();
+
+    // ── groups (รวม 3ตัวบน + โต๊ด เป็น group เดียว) ───────────────────────
     const groups = {
+      "สามตัวบน+โต๊ด": buildEmptyGroup("สามตัวบน+โต๊ด"),
       สามตัวล่าง: buildEmptyGroup("สามตัวล่าง"),
-      สามตัวบน: buildEmptyGroup("สามตัวบน"),
-      สามตัวโต๊ด: buildEmptyGroup("สามตัวโต๊ด"),
-      สองตัวล่าง: buildEmptyGroup("สองตัวล่าง"),
       สองตัวบน: buildEmptyGroup("สองตัวบน"),
+      สองตัวล่าง: buildEmptyGroup("สองตัวล่าง"),
     };
 
     for (const order of orders) {
@@ -137,31 +139,7 @@ exports.saveAndCheckLottery = async (req, res) => {
         const number = String(item.number || "").trim();
         const amount = Number(item.amount || 0);
 
-        let isWin = false;
-
-        if (betType === "สามตัวบน" && number === three_top) {
-          isWin = true;
-        }
-
-        if (betType === "สามตัวโต๊ด" && threeTodSet.has(number)) {
-          isWin = true;
-        }
-
-        if (betType === "สองตัวบน" && number === two_top) {
-          isWin = true;
-        }
-
-        if (betType === "สองตัวล่าง" && number === two_bottom) {
-          isWin = true;
-        }
-
-        if (betType === "สามตัวล่าง" && threeBottomSet.has(number)) {
-          isWin = true;
-        }
-
-        if (!isWin) continue;
-
-        pushWinner(groups[betType], {
+        const baseRow = {
           order_id: String(order._id),
           buyer_id: order.buyer_id ? String(order.buyer_id) : "",
           buyer_name: order.buyer_name || "-",
@@ -169,17 +147,51 @@ exports.saveAndCheckLottery = async (req, res) => {
           number,
           amount,
           created_at: item.created_at || order.createdAt,
-        });
+        };
+
+        // ✅ 3 ตัวบน
+        if (betType === "สามตัวบน" && number === three_top) {
+          pushWinner(groups["สามตัวบน+โต๊ด"], baseRow);
+          continue;
+        }
+
+        // ✅ 3 ตัวโต๊ด — รองรับทั้ง store เป็นตัวจริงและ canonical
+        if (betType === "สามตัวโต๊ด") {
+          const isMatch =
+            threeTodPerms.has(number) || // เลขตรง permutation
+            canonicalTod(number) === threeTodCanon; // canonical ตรงกัน
+          if (isMatch) {
+            pushWinner(groups["สามตัวบน+โต๊ด"], baseRow);
+            continue;
+          }
+        }
+
+        // ✅ 2 ตัวบน (2 ตัวท้ายของ 3 ตัวบน)
+        if (betType === "สองตัวบน" && number === two_top) {
+          pushWinner(groups["สองตัวบน"], baseRow);
+          continue;
+        }
+
+        // ✅ 2 ตัวล่าง
+        if (betType === "สองตัวล่าง" && number === two_bottom) {
+          pushWinner(groups["สองตัวล่าง"], baseRow);
+          continue;
+        }
+
+        // ✅ 3 ตัวล่าง
+        if (betType === "สามตัวล่าง" && threeBottomSet.has(number)) {
+          pushWinner(groups["สามตัวล่าง"], baseRow);
+          continue;
+        }
       }
     }
 
     const summary = [
+      groups["สามตัวบน+โต๊ด"],
       groups["สามตัวล่าง"],
-      groups["สามตัวบน"],
-      groups["สามตัวโต๊ด"],
-      groups["สองตัวล่าง"],
       groups["สองตัวบน"],
-    ].filter((x) => x.total_count > 0);
+      groups["สองตัวล่าง"],
+    ].filter((g) => g.total_count > 0);
 
     return res.json({
       success: true,
@@ -199,10 +211,9 @@ exports.saveAndCheckLottery = async (req, res) => {
     });
   } catch (err) {
     console.error("saveAndCheckLottery error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "saveAndCheckLottery failed",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "saveAndCheckLottery failed" });
   }
 };
 
@@ -210,22 +221,14 @@ exports.saveAndCheckLottery = async (req, res) => {
 exports.getLatestLotteryResult = async (req, res) => {
   try {
     const ownerId = req.user?.id || req.user?._id || null;
-
-    const q = { ownerId: ownerId || null };
-
-    const row = await LotteryResult.findOne(q)
+    const row = await LotteryResult.findOne({ ownerId: ownerId || null })
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
-
-    return res.json({
-      success: true,
-      data: row || null,
-    });
+    return res.json({ success: true, data: row || null });
   } catch (err) {
     console.error("getLatestLotteryResult error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "getLatestLotteryResult failed",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "getLatestLotteryResult failed" });
   }
 };

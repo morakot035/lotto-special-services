@@ -8,6 +8,8 @@ import {
   exportSummary2DExcel,
   exportSummary3DExcel,
   getOverallSummaryReport,
+  exportSummary2DPDF,
+  exportSummary3DPDF,
 } from "../controllers/report.controller.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
 // ถ้ามี auth middleware ให้ใส่เหมือน route อื่น ๆ
@@ -20,6 +22,9 @@ router.get("/summary/3d", verifyToken, getThreeDigitSummaryReport);
 // export excel
 router.get("/summary/2d/export-excel", verifyToken, exportSummary2DExcel);
 router.get("/summary/3d/export-excel", verifyToken, exportSummary3DExcel);
+
+router.get("/summary/2d/export-pdf", verifyToken, exportSummary2DPDF);
+router.get("/summary/3d/export-pdf", verifyToken, exportSummary3DPDF);
 
 router.get("/summary/overall", verifyToken, getOverallSummaryReport);
 

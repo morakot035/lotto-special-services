@@ -67,6 +67,17 @@ function mergeRowsToMatrix3D(rows) {
   );
 }
 
+function sortDiagonal(rows) {
+  return [...rows].sort((a, b) => {
+    const aNum = String(a.number).padStart(2, "0");
+    const bNum = String(b.number).padStart(2, "0");
+    const aSum = parseInt(aNum[0]) + parseInt(aNum[1]);
+    const bSum = parseInt(bNum[0]) + parseInt(bNum[1]);
+    if (aSum !== bSum) return aSum - bSum;
+    return parseInt(aNum) - parseInt(bNum);
+  });
+}
+
 exports.getTwoDigitSummaryReport = async (req, res) => {
   try {
     // ✅ เอา filter created_by ออกก่อน เพื่อเช็คข้อมูลจริงในระบบ
@@ -125,8 +136,8 @@ exports.getTwoDigitSummaryReport = async (req, res) => {
     return res.json({
       success: true,
       data: {
-        keep: mergeRowsToMatrix2D(data.keep || []),
-        send: mergeRowsToMatrix2D(data.send || []),
+        keep: sortDiagonal(mergeRowsToMatrix2D(data.keep || [])),
+        send: sortDiagonal(mergeRowsToMatrix2D(data.send || [])),
       },
     });
   } catch (err) {

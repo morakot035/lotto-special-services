@@ -20,12 +20,9 @@ exports.listOrderItems = async (req, res) => {
       typeof req.query.betType === "string" ? req.query.betType.trim() : "";
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    const userId = req.user?.id || req.user?._id || null;
+    const userId = null; // ✅ global — ไม่แยก user
 
     const matchOrder = {};
-    if (userId) {
-      matchOrder.created_by = new mongoose.Types.ObjectId(userId);
-    }
 
     const pipeline = [
       { $match: matchOrder },
@@ -113,7 +110,7 @@ exports.listOrderItems = async (req, res) => {
 // body: { items: [{ order_id, item_index }] }
 exports.bulkDeleteOrderItems = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?._id || null;
+    const userId = null; // ✅ global — ไม่แยก user
     const payloadItems = Array.isArray(req.body?.items) ? req.body.items : [];
 
     if (payloadItems.length === 0) {
@@ -153,9 +150,6 @@ exports.bulkDeleteOrderItems = async (req, res) => {
 
     for (const [orderId, indexes] of grouped.entries()) {
       const q = { _id: orderId };
-      if (userId) {
-        q.created_by = new mongoose.Types.ObjectId(userId);
-      }
 
       const order = await Order.findOne(q);
       if (!order) continue;
@@ -176,15 +170,12 @@ exports.bulkDeleteOrderItems = async (req, res) => {
           (sum, it) => sum + Number(it.amount || 0),
           0,
         );
-        if (userId) {
-          order.updated_by = userId;
-        }
         await order.save();
       }
     }
 
     const keepDoc = (await KeepSetting.findOne({
-      ownerId: userId || null,
+      ownerId: null,
     }).lean()) || {
       three_top: 0,
       three_bottom: 0,
@@ -193,7 +184,7 @@ exports.bulkDeleteOrderItems = async (req, res) => {
       two_bottom: 0,
     };
 
-    const recalc = await recalcOrdersForToday(userId, keepDoc);
+    const recalc = await recalcOrdersForToday(null, keepDoc);
 
     return res.json({
       success: true,

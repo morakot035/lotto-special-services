@@ -51,10 +51,10 @@ function validatePayload(body) {
 
 exports.listKickRules = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
 
     const rows = await KickRule.find({
-      ownerId: ownerId || null,
+      ownerId: null,
     })
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
@@ -70,7 +70,7 @@ exports.listKickRules = async (req, res) => {
 
 exports.createKickRule = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
 
     const errMsg = validatePayload(req.body || {});
     if (errMsg) {
@@ -78,7 +78,7 @@ exports.createKickRule = async (req, res) => {
     }
 
     const payload = {
-      ownerId: ownerId || null,
+      ownerId: null,
       number: normalizeNumber(req.body.number),
       bet_type: normalizeBetType(req.body.bet_type),
       mode: String(req.body.mode).trim(),
@@ -88,7 +88,7 @@ exports.createKickRule = async (req, res) => {
 
     const doc = await KickRule.findOneAndUpdate(
       {
-        ownerId: payload.ownerId,
+        ownerId: null,
         number: payload.number,
         bet_type: payload.bet_type,
       },
@@ -97,7 +97,7 @@ exports.createKickRule = async (req, res) => {
     ).lean();
 
     const keepDoc = (await KeepSetting.findOne({
-      ownerId: ownerId || null,
+      ownerId: null,
     }).lean()) || {
       three_top: 0,
       three_bottom: 0,
@@ -106,7 +106,7 @@ exports.createKickRule = async (req, res) => {
       two_bottom: 0,
     };
 
-    const recalc = await recalcOrdersForToday(ownerId, keepDoc);
+    const recalc = await recalcOrdersForToday(null, keepDoc);
 
     return res.json({ success: true, data: doc, recalc });
   } catch (err) {
@@ -119,7 +119,7 @@ exports.createKickRule = async (req, res) => {
 
 exports.updateKickRule = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
@@ -128,7 +128,7 @@ exports.updateKickRule = async (req, res) => {
 
     const current = await KickRule.findOne({
       _id: id,
-      ownerId: ownerId || null,
+      ownerId: null,
     }).lean();
     if (!current) {
       return res
@@ -150,7 +150,7 @@ exports.updateKickRule = async (req, res) => {
     }
 
     const doc = await KickRule.findOneAndUpdate(
-      { _id: id, ownerId: ownerId || null },
+      { _id: id, ownerId: null },
       {
         $set: {
           number: normalizeNumber(next.number),
@@ -164,7 +164,7 @@ exports.updateKickRule = async (req, res) => {
     ).lean();
 
     const keepDoc = (await KeepSetting.findOne({
-      ownerId: ownerId || null,
+      ownerId: null,
     }).lean()) || {
       three_top: 0,
       three_bottom: 0,
@@ -173,7 +173,7 @@ exports.updateKickRule = async (req, res) => {
       two_bottom: 0,
     };
 
-    const recalc = await recalcOrdersForToday(ownerId, keepDoc);
+    const recalc = await recalcOrdersForToday(null, keepDoc);
 
     return res.json({ success: true, data: doc, recalc });
   } catch (err) {
@@ -186,7 +186,7 @@ exports.updateKickRule = async (req, res) => {
 
 exports.deleteKickRule = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
@@ -195,7 +195,7 @@ exports.deleteKickRule = async (req, res) => {
 
     const doc = await KickRule.findOneAndDelete({
       _id: id,
-      ownerId: ownerId || null,
+      ownerId: null,
     }).lean();
     if (!doc) {
       return res
@@ -204,7 +204,7 @@ exports.deleteKickRule = async (req, res) => {
     }
 
     const keepDoc = (await KeepSetting.findOne({
-      ownerId: ownerId || null,
+      ownerId: null,
     }).lean()) || {
       three_top: 0,
       three_bottom: 0,
@@ -213,7 +213,7 @@ exports.deleteKickRule = async (req, res) => {
       two_bottom: 0,
     };
 
-    const recalc = await recalcOrdersForToday(ownerId, keepDoc);
+    const recalc = await recalcOrdersForToday(null, keepDoc);
 
     return res.json({ success: true, data: doc, recalc });
   } catch (err) {

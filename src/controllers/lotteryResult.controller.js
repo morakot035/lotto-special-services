@@ -51,7 +51,7 @@ function pushWinner(group, row) {
 // POST /api/lottery-results/check
 exports.saveAndCheckLottery = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
 
     const draw_date = String(req.body?.draw_date || "").trim();
     const three_top = normalizeDigits(req.body?.three_top);
@@ -74,19 +74,17 @@ exports.saveAndCheckLottery = async (req, res) => {
       !isThreeDigits(three_bottom_3) ||
       !isThreeDigits(three_bottom_4)
     )
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "กรุณากรอกผลหวยให้ครบและรูปแบบตัวเลขให้ถูกต้อง",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "กรุณากรอกผลหวยให้ครบและรูปแบบตัวเลขให้ถูกต้อง",
+      });
 
     // บันทึกผล
     await LotteryResult.findOneAndUpdate(
-      { ownerId: ownerId || null, draw_date },
+      { ownerId: null, draw_date },
       {
         $set: {
-          ownerId: ownerId || null,
+          ownerId: null,
           draw_date,
           three_top,
           two_bottom,
@@ -119,7 +117,6 @@ exports.saveAndCheckLottery = async (req, res) => {
 
     // ── ดึง orders ─────────────────────────────────────────────────────────
     const orderQuery = {};
-    if (ownerId) orderQuery.created_by = new mongoose.Types.ObjectId(ownerId);
 
     const orders = await Order.find(orderQuery)
       .sort({ createdAt: -1, _id: -1 })
@@ -146,6 +143,8 @@ exports.saveAndCheckLottery = async (req, res) => {
           bet_type: betType,
           number,
           amount,
+          is_locked: Boolean(item.is_locked), // ✅ เพิ่ม
+          lock_rate: Number(item.lock_rate || 1), // ✅ เพิ่ม
           created_at: item.created_at || order.createdAt,
         };
 
@@ -220,8 +219,8 @@ exports.saveAndCheckLottery = async (req, res) => {
 // GET /api/lottery-results/latest
 exports.getLatestLotteryResult = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
-    const row = await LotteryResult.findOne({ ownerId: ownerId || null })
+    const ownerId = null; // ✅ global — ไม่แยก user
+    const row = await LotteryResult.findOne({ ownerId: null })
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
     return res.json({ success: true, data: row || null });

@@ -14,12 +14,9 @@ exports.listBuyerSummaries = async (req, res) => {
     const pageSize = Math.min(toPositiveInt(req.query.pageSize, 10), 100);
     const skip = (page - 1) * pageSize;
 
-    const userId = req.user?.id || req.user?._id || null;
+    const userId = null; // ✅ global — ไม่แยก user
 
     const match = {};
-    if (userId) {
-      match.created_by = new mongoose.Types.ObjectId(userId);
-    }
 
     const grouped = await Order.aggregate([
       { $match: match },
@@ -93,15 +90,11 @@ exports.getBuyerSummaryDetails = async (req, res) => {
       });
     }
 
-    const userId = req.user?.id || req.user?._id || null;
+    const userId = null; // ✅ global — ไม่แยก user
 
     const match = {
       buyer_id: new mongoose.Types.ObjectId(buyerId),
     };
-
-    if (userId) {
-      match.created_by = new mongoose.Types.ObjectId(userId);
-    }
 
     const result = await Order.aggregate([
       { $match: match },

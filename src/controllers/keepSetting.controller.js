@@ -20,13 +20,13 @@ function sanitizePayload(body) {
 
 exports.getKeepSettings = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
 
-    let doc = await KeepSetting.findOne({ ownerId }).lean();
+    let doc = await KeepSetting.findOne({ ownerId: null }).lean();
 
     if (!doc) {
       const created = await KeepSetting.create({
-        ownerId,
+        ownerId: null,
         three_top: 0,
         three_bottom: 0,
         three_tod: 0,
@@ -48,16 +48,16 @@ exports.getKeepSettings = async (req, res) => {
 
 exports.updateKeepSettings = async (req, res) => {
   try {
-    const ownerId = req.user?.id || req.user?._id || null;
+    const ownerId = null; // ✅ global — ไม่แยก user
     const payload = sanitizePayload(req.body);
 
     const doc = await KeepSetting.findOneAndUpdate(
-      { ownerId },
+      { ownerId: null },
       { $set: payload },
       { new: true, upsert: true },
     ).lean();
 
-    const recalc = await recalcOrdersForToday(ownerId, doc);
+    const recalc = await recalcOrdersForToday(null, doc);
 
     return res.json({
       success: true,

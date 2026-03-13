@@ -44,7 +44,7 @@ exports.createOrder = async (req, res) => {
 
     const userId = req.user?.id || req.user?._id || null;
 
-    const keepDoc = (await KeepSetting.findOne({ ownerId: userId }).lean()) || {
+    const keepDoc = (await KeepSetting.findOne({ ownerId: null }).lean()) || {
       three_top: 0,
       three_bottom: 0,
       three_tod: 0,
@@ -52,11 +52,11 @@ exports.createOrder = async (req, res) => {
       two_bottom: 0,
     };
 
-    const kickRulesMap = await loadActiveKickRulesMap(userId);
+    const kickRulesMap = await loadActiveKickRulesMap(null);
 
     // ✅ replay วันนี้ทั้งหมดก่อน เพื่อให้รู้ progress จริงของ keep + kick send
     const { runningKeepTotals, runningKickSentTotals } =
-      await getTodayPoolProgress(userId, keepDoc, kickRulesMap);
+      await getTodayPoolProgress(null, keepDoc, kickRulesMap);
 
     const normalizedItems = [];
 

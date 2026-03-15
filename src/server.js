@@ -19,28 +19,37 @@ connectDB();
 
 const app = express();
 app.use(express.json());
-app.use(
-  cors({
-    origin: [
-      "http://localhost:3000",
-      "https://lotto-special-app.vercel.app",
-      "https://lotto-special-services.onrender.com",
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-app.options(/.*/, cors());
+
+// ✅ CORS config เดียว ครอบทุก origin + method + header
+const corsOptions = {
+  origin: [
+    "http://localhost:3000",
+    "https://lotto-special-app.vercel.app",
+    "https://lotto-special-services.onrender.com",
+  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Content-Disposition"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
+// ✅ preflight ทุก route ใช้ config เดียวกัน
+app.options(/(.*)/, cors(corsOptions));
+
 app.use(
   helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: false,
   }),
 );
+
 app.use((req, res, next) => {
   console.log(`📥 Request: ${req.method} ${req.url}`);
   next();
 });
+
 app.use("/api/auth", authRoutes);
 app.use("/api/buyers", buyerRoutes);
 app.use("/api", orderRoutes);

@@ -75,43 +75,89 @@ function sortDiagonal(rows) {
 
 // ── aggregate helpers ──────────────────────────────────────────────────────
 
-async function get2DAggregated() {
-  const rows = await Order.aggregate([
-    { $unwind: "$items" },
-    { $match: { "items.bet_type": { $in: ["สองตัวบน", "สองตัวล่าง"] } } },
+// แยก buyer ตาม suffix (1 = ไม่อั้น, 2 = อั้น, อื่นๆ = รวมทั้งหมด)
+function getBuyerGroupFilter(group) {
+  if (group === "1") {
+    // buyer_name ลงท้ายด้วย space+1 หรือ ตัวเลข 1 ท้ายสุด
+    return { buyer_name: { $regex: /\s*1\s*$/ } };
+  }
+  if (group === "2") {
+    return { buyer_name: { $regex: /\s*2\s*$/ } };
+  }
+  return {}; // all
+}
+
+function make2DFacet(amountField) {
+  return [
     {
-      $facet: {
-        keep: [
-          {
-            $group: {
-              _id: { number: "$items.number", bet_type: "$items.bet_type" },
-              amount: { $sum: { $ifNull: ["$items.keep_amount", 0] } },
-              is_locked: {
-                $max: { $cond: [{ $eq: ["$items.is_locked", true] }, 1, 0] },
-              },
-            },
-          },
-          { $sort: { "_id.number": 1, "_id.bet_type": 1 } },
-        ],
-        send: [
-          {
-            $group: {
-              _id: { number: "$items.number", bet_type: "$items.bet_type" },
-              amount: { $sum: { $ifNull: ["$items.send_amount", 0] } },
-              is_locked: {
-                $max: { $cond: [{ $eq: ["$items.is_locked", true] }, 1, 0] },
-              },
-            },
-          },
-          { $sort: { "_id.number": 1, "_id.bet_type": 1 } },
-        ],
+      $group: {
+        _id: { number: "$items.number", bet_type: "$items.bet_type" },
+        amount: { $sum: { $ifNull: [amountField, 0] } },
+        is_locked: {
+          $max: { $cond: [{ $eq: ["$items.is_locked", true] }, 1, 0] },
+        },
       },
     },
+    { $sort: { "_id.number": 1, "_id.bet_type": 1 } },
+  ];
+}
+
+async function get2DAggregated() {
+  const betMatch = { "items.bet_type": { $in: ["สองตัวบน", "สองตัวล่าง"] } };
+
+  // ── query แยก 3 กลุ่มพร้อมกัน ──────────────────────────────────────────
+  const [allRows, group1Rows, group2Rows] = await Promise.all([
+    // ทั้งหมด
+    Order.aggregate([
+      { $unwind: "$items" },
+      { $match: betMatch },
+      {
+        $facet: {
+          keep: make2DFacet("$items.keep_amount"),
+          send: make2DFacet("$items.send_amount"),
+        },
+      },
+    ]),
+    // ชื่อ+1 (ไม่อั้น)
+    Order.aggregate([
+      { $match: { buyer_name: { $regex: /\s*1\s*$/ } } },
+      { $unwind: "$items" },
+      { $match: betMatch },
+      {
+        $facet: {
+          keep: make2DFacet("$items.keep_amount"),
+          send: make2DFacet("$items.send_amount"),
+        },
+      },
+    ]),
+    // ชื่อ+2 (อั้น)
+    Order.aggregate([
+      { $match: { buyer_name: { $regex: /\s*2\s*$/ } } },
+      { $unwind: "$items" },
+      { $match: betMatch },
+      {
+        $facet: {
+          keep: make2DFacet("$items.keep_amount"),
+          send: make2DFacet("$items.send_amount"),
+        },
+      },
+    ]),
   ]);
-  const data = rows[0] || { keep: [], send: [] };
+
+  const all = allRows[0] || { keep: [], send: [] };
+  const grp1 = group1Rows[0] || { keep: [], send: [] };
+  const grp2 = group2Rows[0] || { keep: [], send: [] };
+
   return {
-    keep: sortDiagonal(mergeRowsToMatrix2D(data.keep || [])),
-    send: sortDiagonal(mergeRowsToMatrix2D(data.send || [])),
+    // รวมทั้งหมด
+    keep: sortDiagonal(mergeRowsToMatrix2D(all.keep || [])),
+    send: sortDiagonal(mergeRowsToMatrix2D(all.send || [])),
+    // ชื่อ+1 ไม่อั้น
+    keep1: sortDiagonal(mergeRowsToMatrix2D(grp1.keep || [])),
+    send1: sortDiagonal(mergeRowsToMatrix2D(grp1.send || [])),
+    // ชื่อ+2 อั้น
+    keep2: sortDiagonal(mergeRowsToMatrix2D(grp2.keep || [])),
+    send2: sortDiagonal(mergeRowsToMatrix2D(grp2.send || [])),
   };
 }
 
@@ -164,8 +210,6 @@ async function get3DAggregated() {
 exports.getTwoDigitSummaryReport = async (req, res) => {
   try {
     const data = await get2DAggregated();
-    console.log("2D KEEP ROWS:", data.keep?.length || 0);
-    console.log("2D SEND ROWS:", data.send?.length || 0);
     return res.json({ success: true, data });
   } catch (err) {
     console.error("getTwoDigitSummaryReport error:", err);
@@ -295,11 +339,24 @@ function build3DSheet(ws, rows, title) {
   autoFitColumns(ws);
 }
 
-// GET /api/reports/summary/2d/export-excel?mode=keep|send|all
+// GET /api/reports/summary/2d/export-excel?mode=keep|send|all&group=1|2 (optional)
 exports.exportSummary2DExcel = async (req, res) => {
   try {
-    const mode = String(req.query.mode || "all").toLowerCase(); // keep | send | all
+    const mode = String(req.query.mode || "all").toLowerCase();
+    const group = String(req.query.group || "").trim(); // "1", "2", หรือ "" = รวม
     const data = await get2DAggregated();
+
+    // เลือก dataset ตาม group
+    const keepData =
+      group === "1" ? data.keep1 : group === "2" ? data.keep2 : data.keep;
+    const sendData =
+      group === "1" ? data.send1 : group === "2" ? data.send2 : data.send;
+    const groupLabel =
+      group === "1"
+        ? " (กลุ่ม 1 ไม่อั้น)"
+        : group === "2"
+          ? " (กลุ่ม 2 อั้น)"
+          : "";
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "LOTTO";
@@ -308,24 +365,25 @@ exports.exportSummary2DExcel = async (req, res) => {
     if (mode === "keep" || mode === "all") {
       build2DSheet(
         wb.addWorksheet("2D_Kept"),
-        data.keep,
-        "สรุปยอดตัดเก็บ เลข 2 ตัว",
+        keepData,
+        `สรุปยอดตัดเก็บ เลข 2 ตัว${groupLabel}`,
       );
     }
     if (mode === "send" || mode === "all") {
       build2DSheet(
         wb.addWorksheet("2D_Sent"),
-        data.send,
-        "สรุปยอดตัดส่ง เลข 2 ตัว",
+        sendData,
+        `สรุปยอดตัดส่ง เลข 2 ตัว${groupLabel}`,
       );
     }
 
+    const gSuffix = group ? `_g${group}` : "";
     const filename =
       mode === "keep"
-        ? "report_2d_kept.xlsx"
+        ? `report_2d_kept${gSuffix}.xlsx`
         : mode === "send"
-          ? "report_2d_sent.xlsx"
-          : "report_2d.xlsx";
+          ? `report_2d_sent${gSuffix}.xlsx`
+          : `report_2d${gSuffix}.xlsx`;
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -527,25 +585,37 @@ function card3D(rows, titleTh, pillClass, titleClass, pill) {
   </div>`;
 }
 
-// GET /api/reports/summary/2d/export-pdf?mode=keep|send|all
+// GET /api/reports/summary/2d/export-pdf?mode=keep|send|all&group=1|2 (optional)
 exports.exportSummary2DPDF = async (req, res) => {
   try {
     const mode = String(req.query.mode || "all").toLowerCase();
+    const group = String(req.query.group || "").trim();
     const data = await get2DAggregated();
+
+    const keepData =
+      group === "1" ? data.keep1 : group === "2" ? data.keep2 : data.keep;
+    const sendData =
+      group === "1" ? data.send1 : group === "2" ? data.send2 : data.send;
+    const groupLabel =
+      group === "1"
+        ? " — กลุ่ม 1 (ไม่อั้น)"
+        : group === "2"
+          ? " — กลุ่ม 2 (อั้น)"
+          : "";
 
     let body = "";
     if (mode === "keep") {
       body = card2D(
-        data.keep,
-        "สรุปยอดตัดเก็บ (kept)",
+        keepData,
+        `สรุปยอดตัดเก็บ (kept)${groupLabel}`,
         "pill-emerald",
         "title-emerald",
         "KEPT",
       );
     } else if (mode === "send") {
       body = card2D(
-        data.send,
-        "สรุปยอดตัดส่ง (sent)",
+        sendData,
+        `สรุปยอดตัดส่ง (sent)${groupLabel}`,
         "pill-sky",
         "title-sky",
         "SENT",
@@ -553,15 +623,15 @@ exports.exportSummary2DPDF = async (req, res) => {
     } else {
       body =
         card2D(
-          data.keep,
-          "สรุปยอดตัดเก็บ (kept)",
+          keepData,
+          `สรุปยอดตัดเก็บ (kept)${groupLabel}`,
           "pill-emerald",
           "title-emerald",
           "KEPT",
         ) +
         card2D(
-          data.send,
-          "สรุปยอดตัดส่ง (sent)",
+          sendData,
+          `สรุปยอดตัดส่ง (sent)${groupLabel}`,
           "pill-sky",
           "title-sky",
           "SENT",
@@ -569,11 +639,15 @@ exports.exportSummary2DPDF = async (req, res) => {
     }
 
     const subtitle =
-      mode === "keep"
-        ? "ยอดที่เก็บไว้กินเอง"
-        : mode === "send"
-          ? "ยอดที่ตัดส่งเจ้ามือใหญ่"
-          : "สรุปยอดตัดเก็บ / ตัดส่ง แยกเป็น 2 ตัวบน และ 2 ตัวล่าง";
+      group === "1"
+        ? "กลุ่ม 1 — ไม่อั้น"
+        : group === "2"
+          ? "กลุ่ม 2 — อั้น"
+          : mode === "keep"
+            ? "ยอดที่เก็บไว้กินเอง"
+            : mode === "send"
+              ? "ยอดที่ตัดส่งเจ้ามือใหญ่"
+              : "สรุปยอดตัดเก็บ / ตัดส่ง แยกเป็น 2 ตัวบน และ 2 ตัวล่าง";
     const html = wrapHtml("รายงานสรุปเลข 2 ตัว", subtitle, body);
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");

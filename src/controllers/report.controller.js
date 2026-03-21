@@ -47,9 +47,9 @@ function mergeRowsToMatrix3D(rows) {
     if (betType === "สามตัวโต๊ด") item.three_tod = amount;
     if (isLocked) item.is_locked = true;
   }
-  return Array.from(map.values()).sort((a, b) =>
-    a.number.localeCompare(b.number),
-  );
+  return Array.from(map.values())
+    .filter((r) => r.three_top > 0 || r.three_bottom > 0 || r.three_tod > 0)
+    .sort((a, b) => a.number.localeCompare(b.number));
 }
 
 function sortDiagonal(rows) {

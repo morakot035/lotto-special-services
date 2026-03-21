@@ -56,9 +56,19 @@ function sortDiagonal(rows) {
   return [...rows].sort((a, b) => {
     const aNum = String(a.number).padStart(2, "0");
     const bNum = String(b.number).padStart(2, "0");
-    const aSum = parseInt(aNum[0]) + parseInt(aNum[1]);
-    const bSum = parseInt(bNum[0]) + parseInt(bNum[1]);
-    if (aSum !== bSum) return aSum - bSum;
+    const aD0 = parseInt(aNum[0]),
+      aD1 = parseInt(aNum[1]);
+    const bD0 = parseInt(bNum[0]),
+      bD1 = parseInt(bNum[1]);
+    const aMin = Math.min(aD0, aD1);
+    const bMin = Math.min(bD0, bD1);
+    const aMax = Math.max(aD0, aD1);
+    const bMax = Math.max(bD0, bD1);
+    // 1. เรียงตาม min digit (00→01,10→02,20→03,30→...→09,90→11→12,21→...)
+    if (aMin !== bMin) return aMin - bMin;
+    // 2. min เท่ากัน → เรียงตาม max digit
+    if (aMax !== bMax) return aMax - bMax;
+    // 3. max เท่ากัน (เช่น 12 vs 21) → เรียงตามตัวเลขจริง
     return parseInt(aNum) - parseInt(bNum);
   });
 }

@@ -79,7 +79,6 @@ function getRuleInfo(keepDoc, kickRulesMap, betType, number) {
     const reduceAmount = Number(rule.amount || 0);
     return {
       base_limit: baseLimit,
-      // ✅ เพดาน keep หลังหักเตะเพิ่ม
       effective_limit: Math.max(0, baseLimit - reduceAmount),
       kick_mode: "REDUCE_KEEP",
       kick_amount: reduceAmount,
@@ -94,12 +93,6 @@ function getRuleInfo(keepDoc, kickRulesMap, betType, number) {
   };
 }
 
-/**
- * logic ใหม่:
- * - FULL_SEND => ส่งทั้งหมด
- * - REDUCE_KEEP => บังคับส่งออกก่อนตาม kick_amount
- *                  และเพดาน keep ของเลขนี้จะเหลือ base_limit - kick_amount
- */
 function splitKeepSendByNumberPool(
   keepDoc,
   kickRulesMap,
@@ -146,7 +139,6 @@ function splitKeepSendByNumberPool(
   let forcedKickSend = 0;
   let remainingAmount = amount;
 
-  // ✅ REDUCE_KEEP = ต้องโดนส่งออกก่อนตามยอดที่กำหนด
   if (kick_mode === "REDUCE_KEEP") {
     const kickSendRemain = Math.max(0, kick_amount - currentKickSentUsed);
     forcedKickSend = Math.min(amount, kickSendRemain);
@@ -154,7 +146,6 @@ function splitKeepSendByNumberPool(
     runningKickSentTotals[poolKey] = currentKickSentUsed + forcedKickSend;
   }
 
-  // ✅ keep ใช้เพดานหลังหักเตะเพิ่มแล้ว
   const keepRemain = Math.max(0, effective_limit - currentKeepUsed);
   const keep = Math.min(remainingAmount, keepRemain);
   const send = forcedKickSend + Math.max(0, remainingAmount - keep);
@@ -172,14 +163,9 @@ function splitKeepSendByNumberPool(
   };
 }
 
-// ✅ คำนวณ progress ของวันนี้ใหม่จาก order ทั้งหมดตามลำดับเวลา
 async function getTodayPoolProgress(ownerId, keepDoc, kickRulesMap) {
-  const from = startOfToday();
-
-  const query = {
-    createdAt: { $gte: from },
-  };
-
+  // ✅ ไม่ filter วัน — limit สะสมตลอดไป ไม่ reset ตามวัน
+  const query = {};
   if (ownerId) {
     query.created_by = ownerIdToFilter(ownerId);
   }
@@ -210,12 +196,8 @@ async function getTodayPoolProgress(ownerId, keepDoc, kickRulesMap) {
 }
 
 async function recalcOrdersForToday(ownerId, keepDoc) {
-  const from = startOfToday();
-
-  const query = {
-    createdAt: { $gte: from },
-  };
-
+  // ✅ ไม่ filter วัน — recalc ทุก order เรียงตามเวลา
+  const query = {};
   if (ownerId) {
     query.created_by = ownerIdToFilter(ownerId);
   }

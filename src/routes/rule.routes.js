@@ -7,6 +7,7 @@ import {
   createRules,
   updateRule,
   deleteRule,
+  deleteAllRules,
 } from "../controllers/rule.controller.js";
 
 const router = express.Router();
@@ -15,6 +16,7 @@ const router = express.Router();
 router.get("/rules", verifyToken, listRules);
 router.post("/rules", verifyToken, createRules);
 router.put("/rules/:id", verifyToken, updateRule);
+router.delete("/rules/delete-all", verifyToken, deleteAllRules);
 router.delete("/rules/:id", verifyToken, deleteRule);
 
 export default router;

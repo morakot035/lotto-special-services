@@ -193,3 +193,25 @@ exports.deleteRule = async (req, res) => {
     });
   }
 };
+
+// DELETE /api/rules/delete-all?kind=LOCK|BLOCK (optional)
+exports.deleteAllRules = async (req, res) => {
+  try {
+    const kind = req.query.kind ? normKind(req.query.kind) : null;
+    const filter = {};
+    if (kind) filter.kind = kind;
+
+    const result = await Rule.deleteMany(filter);
+    return res.json({
+      ok: true,
+      message: `ลบสำเร็จ ${result.deletedCount} รายการ`,
+      data: { deletedCount: result.deletedCount },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      message: "ลบทั้งหมดไม่สำเร็จ",
+      error: { message: err?.message || "unknown" },
+    });
+  }
+};
